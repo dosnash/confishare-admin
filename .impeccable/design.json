@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "ConfiShare Admin",
+  "mode": "operate",
+  "tokens": {
+    "color": {
+      "canvas": "#FAFAFA",
+      "surface": "#FFFFFF",
+      "primary": "#059669",
+      "ink": "#0F172A",
+      "secondary": "#475569",
+      "mutedSurface": "#F1F5F9",
+      "border": "#E5E7EB"
+    },
+    "fontFamily": "Inter Variable",
+    "radius": { "card": "12px", "dialog": "16px", "control": "9px" }
+  }
+}
