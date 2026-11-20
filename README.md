@@ -8,7 +8,7 @@ This project uses the Next.js App Router in `src/app`. Each `page.tsx` defines a
 
 Put static assets in the root `public` folder, beside `src`. The supplied `logo-light.svg` is the in-app wordmark, `og-image.jpg` is the social sharing image, and `icon.png` and `apple-icon.png` are generated from the supplied logo photograph for browser and device icons.
 
-`/admin` is the dashboard route. The former `/admints` URL redirects there for existing bookmarks.
+`/login` is the sign-in route and `/admin` is the dashboard route.
 
 Set `SITE_URL` to the deployed site origin for absolute social image URLs. Vercel deployments use their production URL automatically when `SITE_URL` is absent.
 

@@ -20,7 +20,7 @@ Give administrators one place to inspect platform-wide user records, filter them
 
 ## Capabilities and Constraints
 
-- `/admints` is the compatibility route.
+- `/login` is the sign-in route and `/admin` is the dashboard route.
 - All dashboard figures derive from `GET /auth/users`.
 - No financial metrics or account mutation actions are available.
 - Admin access needs a confirmed backend-issued claim and backend enforcement on `/auth/users`. The claim path and policy remain open integration facts.
@@ -28,7 +28,7 @@ Give administrators one place to inspect platform-wide user records, filter them
 
 ## Brand Commitments
 
-The supplied brief specifies a light, restrained SaaS interface, Inter, green `#059669`, near-black `#0F172A`, slate secondary text, and pale gray surfaces. No logo asset was provided.
+The supplied brief specifies a light, restrained SaaS interface, Inter, green `#059669`, near-black `#0F172A`, slate secondary text, and pale gray surfaces. Supplied logo and sharing assets are in `public`.
 
 ## Accessibility & Inclusion
 
