@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { ArrowRight, ChartNoAxesCombined, CreditCard, Eye, EyeOff, LockKeyhole, ShieldCheck, Users } from "lucide-react";
 import Logo from "./logo";
 
@@ -18,14 +19,14 @@ export default function Login() {
       const response = await fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Sign in failed.");
-      router.replace("/admints"); router.refresh();
+      router.replace("/admin"); router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Sign in failed."); setBusy(false); }
   }
   return <main className="login-page">
     <aside className="login-brand-panel" aria-label="ConfiShare administration">
       <div className="login-brand-top"><Logo /><span className="login-brand-tag">ADMIN</span></div>
       <div className="login-brand-content">
-        <div className="login-brand-symbol" aria-hidden="true"><span /><span /><span /></div>
+        <div className="login-brand-symbol" aria-hidden="true"><Image src="/icon.png" alt="" width={72} height={72} /></div>
         <h2>A clearer view of your platform.</h2>
         <p>Users, subscriptions and usage in one focused workspace.</p>
         <div className="login-feature-list" aria-hidden="true">

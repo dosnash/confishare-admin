@@ -67,3 +67,10 @@
 .login-form-panel .login-bottom span{color:#94a3b8}
 @media(max-width:900px){.login-page{display:block}.login-brand-panel{display:none}.login-form-panel{min-height:100vh;padding:28px 24px 24px}.login-mobile-brand{display:flex;align-items:center;justify-content:space-between;width:100%}.login-mobile-brand>span{font-size:10px;font-weight:750;letter-spacing:.14em;color:#047857;border-radius:6px;background:#e9f8f1;padding:7px 9px}.login-center{transform:none}.login-form-panel .login-bottom{display:flex}}
 @media(max-width:480px){.login-form-panel{padding:22px 20px 20px}.login-center{width:100%;margin:auto}.login-center h1{font-size:28px}.login-subtitle{margin-bottom:30px}.login-footnote{justify-content:flex-start}.login-form-panel .login-bottom span{display:none}}
+
+/* Supplied ConfiShare artwork */
+.brand-logo{display:block;width:177px;height:auto}
+.login-brand-panel .brand-logo{filter:brightness(0) invert(1)}
+.login-brand-symbol{display:flex;align-items:center;justify-content:center;padding:7px;background:#fff;border-color:#ffffff70}
+.login-brand-symbol img{display:block;width:100%;height:100%;object-fit:contain}
+@media(max-width:650px){.brand-logo{width:155px}}

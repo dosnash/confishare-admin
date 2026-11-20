@@ -1,2 +1,8 @@
 import { redirect } from "next/navigation";
-export default function AdminRedirect() { redirect("/admints"); }
+import { token } from "@/lib/server-auth";
+import Dashboard from "@/components/dashboard";
+
+export default async function AdminPage() {
+  if (!await token()) redirect("/login");
+  return <Dashboard />;
+}

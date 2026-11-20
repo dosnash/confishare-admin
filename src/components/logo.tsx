@@ -1,6 +1,14 @@
+import Image from "next/image";
+
 export default function Logo({ compact = false }: { compact?: boolean }) {
-  return <span className="brand" aria-label="ConfiShare">
-    <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
-    {!compact && <span className="brand-name">Confi<span>Share</span></span>}
+  return <span className="brand">
+    <Image
+      className="brand-logo"
+      src={compact ? "/icon.png" : "/logo-light.svg"}
+      alt="ConfiShare"
+      width={compact ? 32 : 177}
+      height={compact ? 32 : 20}
+      priority
+    />
   </span>;
 }
