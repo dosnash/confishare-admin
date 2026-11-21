@@ -70,7 +70,7 @@ export function normalizeUsers(payload: unknown): AdminUser[] {
   if (!payload || typeof payload !== "object") throw new Error("The users response was not valid.");
   const body = payload as Record<string, unknown>;
   const data = body.data && typeof body.data === "object" ? body.data as Record<string, unknown> : null;
-  const raw = body.users ?? (Array.isArray(body.data) ? body.data : data?.users);
+  const raw = body.users ?? (Array.isArray(body.data) ? body.data : data?.users ?? data?.items);
   if (!Array.isArray(raw)) throw new Error("The API returned an unexpected users format.");
   return raw.map((item, index) => {
     if (!item || typeof item !== "object") throw new Error(`User ${index + 1} was invalid.`);

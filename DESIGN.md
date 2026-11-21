@@ -28,6 +28,6 @@ The admin surface is an operating workspace: clear scanning, predictable control
 - Green marks primary actions and selections. Subscription states use their specified semantic colors.
 - Loading uses skeletons, errors offer retry, and empty filters explain how to recover.
 - Motion is brief and disabled through reduced-motion preferences.
-- The login uses a deep green brand panel on desktop, with the sign-in form on a quiet white surface. At tablet and mobile widths, the brand panel gives way to a compact wordmark header so the form stays primary.
+- The login is a single centered card on a softly tinted canvas, with the wordmark above it. There is no side brand panel at any width.
 
 The wordmark is a replaceable placeholder because no official logo asset was supplied.

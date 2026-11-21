@@ -20,11 +20,23 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open `/admin`. Set `NEXT_PUBLIC_API_URL` to the API base URL. `ADMIN_CLAIM_PATH` is a dot path to a **backend-issued Boolean admin claim** on the login `user` object (for example, `permissions.isPlatformAdmin`). Login fails closed if the claim is absent or false. Do not set this to `role`, `accountType`, `OWNER`, or `TEAM_MEMBER`.
+Open `/admin`. Set `NEXT_PUBLIC_API_URL` to the API base URL (default `https://server.confishare.io/api/v1`).
 
-The backend must independently enforce admin authorization on `GET /auth/users` and return 403 for ordinary users. This app cannot verify or repair that backend rule. Confirm the actual claim name and the endpoint's access policy with the backend owner before production use.
+## Admin auth and management
 
-The server stores the bearer token in an HTTP-only, same-site cookie and proxies the users request. The browser does not receive the bearer token. Sessions are cleared on upstream 401; upstream 403 becomes an explicit access-denied view.
+The app uses the dedicated admin API under `/api/v1/admin`:
+
+| Area | Endpoints |
+| --- | --- |
+| Sign in / out | `POST auth/login`, `POST auth/logout` |
+| Your account | `GET/PATCH auth/me`, `POST auth/change-password` (rotates the token) |
+| Admins (super admin only) | `GET/POST admins`, `PATCH admins/:id` (`role`, `isActive`) |
+| Activity | `GET audit-logs`, `GET document-audit-logs` |
+| Overview | `GET users` |
+
+The server keeps the admin bearer token in an HTTP-only, same-site cookie. The browser never sees it: every call goes through `/api/admin/*`, an allowlisted proxy that attaches the token and clears the session on an upstream 401. Super admins see the Admins page and all admins' activity; admins see only their own activity.
+
+Routes: `/login`, `/admin` (overview), `/admin/admins`, `/admin/audit-logs`, `/admin/document-audit-logs`, `/admin/account`.
 
 ```bash
 npm run build

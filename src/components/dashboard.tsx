@@ -1,19 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip } from "chart.js";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { AlertCircle, ArrowDownToLine, BadgeCheck, Building2, ChevronDown, ChevronLeft, ChevronRight, CreditCard, Hourglass, LayoutDashboard, LogOut, Menu, RefreshCw, Search, ShieldCheck, User, Users, UsersRound, X } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, BadgeCheck, Building2, ChevronLeft, ChevronRight, CreditCard, Hourglass, RefreshCw, Search, ShieldCheck, User, Users, UsersRound, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AdminUser, companyFor, csvFor, displayName, formatDate, formatStorage, normalizeUsers, statusLabel, statuses, StatusFilter, validDate } from "@/lib/admin";
-import Logo from "./logo";
+import { useAdminApi, useSession } from "./admin-shell";
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip);
 const number = (value: number) => new Intl.NumberFormat("en").format(value);
 const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const pageSize = 15;
+
+/** Reads a total count from paginated users responses, if the API provides one. */
+function totalOf(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const body = payload as Record<string, unknown>;
+  const data = body.data && typeof body.data === "object" && !Array.isArray(body.data) ? body.data as Record<string, unknown> : {};
+  const meta = [data.pagination, data.meta, body.pagination, body.meta].find(item => item && typeof item === "object") as Record<string, unknown> | undefined;
+  const value = meta?.total ?? data.total ?? body.total;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 type DateFilter = "ANY" | "TODAY" | "7" | "30" | "MONTH" | "CUSTOM";
 
 function StatusPill({ value }: { value?: string }) {
@@ -76,14 +85,13 @@ function DetailDialog({ user, users, close }: { user: AdminUser; users: AdminUse
 }
 
 export default function Dashboard() {
-  const router = useRouter();
+  const api = useAdminApi();
+  const { signOut } = useSession();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [denied, setDenied] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [status, setStatus] = useState<StatusFilter>("ALL");
   const [search, setSearch] = useState("");
   const [plan, setPlan] = useState("ALL");
@@ -96,15 +104,23 @@ export default function Dashboard() {
     if (initial) setLoading(true); else setRefreshing(true);
     setError(""); setDenied(false);
     try {
-      const response = await fetch("/api/users", { cache: "no-store" });
-      if (response.status === 401) { router.replace("/login"); router.refresh(); return; }
-      if (response.status === 403) { setDenied(true); return; }
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Users could not be loaded.");
-      setUsers(normalizeUsers(result));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Users could not be loaded."); }
+      const all: AdminUser[] = [];
+      const seen = new Set<string>();
+      for (let page = 1; page <= 200; page++) {
+        const result = await api(`users?page=${page}&limit=100`);
+        const batch = normalizeUsers(result);
+        const fresh = batch.filter(user => !seen.has(user._id));
+        fresh.forEach(user => { seen.add(user._id); all.push(user); });
+        const total = totalOf(result);
+        if (!fresh.length || batch.length < 100 || (total !== null && all.length >= total)) break;
+      }
+      setUsers(all);
+    } catch (cause) {
+      if ((cause as { status?: number }).status === 403) setDenied(true);
+      else setError(cause instanceof Error ? cause.message : "Users could not be loaded.");
+    }
     finally { setLoading(false); setRefreshing(false); }
-  }, [router]);
+  }, [api]);
   useEffect(() => { void load(true); }, [load]);
   useEffect(() => setPage(1), [status, search, plan, dateFilter, from, to]);
   const now = useMemo(() => new Date(), []);
@@ -146,15 +162,11 @@ export default function Dashboard() {
     { label: "New in last 30 days", value: users.filter(user => { const date = validDate(user.createdAt); return date && date <= now && date.getTime() >= now.getTime() - 30 * 86400000; }).length, icon: Users },
   ];
   const planRows = useMemo(() => { const map = new Map<string, number>(); users.forEach(user => { const key = user.subscription?.subscriptionPlan || "No paid plan"; map.set(key, (map.get(key) || 0) + 1); }); return [...map].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)); }, [users]);
-  async function logout() { await fetch("/api/session", { method: "DELETE" }); router.replace("/login"); router.refresh(); }
   function exportCsv() { const blob = new Blob([csvFor(filtered, users)], { type: "text/csv;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `confishare-users-${dateKey(new Date())}.csv`; link.click(); URL.revokeObjectURL(url); }
-  return <div className="app-shell">
-    <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" aria-label="Open navigation" onClick={() => setMenuOpen(true)}><Menu size={21} /></button><Logo /><span className="admin-context">Admin workspace</span></div><div className="profile-area"><button className="profile-trigger" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}><span className="profile-avatar">A</span><span className="profile-text">Administrator</span><ChevronDown size={16} /></button>{profileOpen && <div className="profile-popover"><div className="profile-popover-head"><strong>Administrator</strong><span>ConfiShare admin</span></div><button onClick={logout}><LogOut size={16} /> Sign out</button></div>}</div></header>
-    {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
-    <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}><div className="side-label">WORKSPACE</div><nav aria-label="Admin navigation"><a href="/admin" className="nav-item active" aria-current="page" onClick={() => setMenuOpen(false)}><LayoutDashboard size={18} /> Admin overview</a></nav><div className="sidebar-bottom"><div className="sidebar-shield"><ShieldCheck size={17} /><span>Administrator access</span></div><p>Platform overview and user insights</p></div></aside>
-    <main className="main-content">
-      <div className="page-heading"><div><h1>Admin</h1><p>Platform-wide users, subscriptions and usage.</p></div><button className="button button-secondary refresh-button" onClick={() => load()} disabled={loading || refreshing}><RefreshCw size={16} className={loading || refreshing ? "spin" : ""} /> Refresh</button></div>
-      {denied ? <div className="state-card"><span className="state-icon danger"><ShieldCheck size={25} /></span><h2>Access denied</h2><p>Your account cannot view platform users. Contact your administrator if this looks wrong.</p><button className="button button-secondary" onClick={logout}>Sign out</button></div> : error ? <div className="state-card"><span className="state-icon danger"><AlertCircle size={25} /></span><h2>Couldn’t load your dashboard</h2><p>{error}</p><button className="button button-primary" onClick={() => load(true)}>Try again</button></div> : loading ? <div className="loading-dashboard" aria-label="Loading dashboard" role="status"><div className="skeleton-stats">{Array.from({ length: 8 }, (_, index) => <span className="skeleton" key={index} />)}</div><div className="skeleton-panels"><span className="skeleton" /><span className="skeleton" /></div><span className="skeleton skeleton-table" /><span className="sr-only">Loading users and platform metrics…</span></div> : <>
+  return <>
+
+      <div className="page-heading"><div><h1>Overview</h1><p>Platform-wide users, subscriptions and usage.</p></div><button className="button button-secondary refresh-button" onClick={() => load()} disabled={loading || refreshing}><RefreshCw size={16} className={loading || refreshing ? "spin" : ""} /> Refresh</button></div>
+      {denied ? <div className="state-card"><span className="state-icon danger"><ShieldCheck size={25} /></span><h2>Access denied</h2><p>Your account cannot view platform users. Contact your administrator if this looks wrong.</p><button className="button button-secondary" onClick={signOut}>Sign out</button></div> : error ? <div className="state-card"><span className="state-icon danger"><AlertCircle size={25} /></span><h2>Couldn’t load your dashboard</h2><p>{error}</p><button className="button button-primary" onClick={() => load(true)}>Try again</button></div> : loading ? <div className="loading-dashboard" aria-label="Loading dashboard" role="status"><div className="skeleton-stats">{Array.from({ length: 8 }, (_, index) => <span className="skeleton" key={index} />)}</div><div className="skeleton-panels"><span className="skeleton" /><span className="skeleton" /></div><span className="skeleton skeleton-table" /><span className="sr-only">Loading users and platform metrics…</span></div> : <>
         <section aria-label="Platform summary" className="stats-grid">{stats.map((stat, index) => <StatCard key={stat.label} {...stat} index={index} />)}</section>
         <div className="analytics-grid"><section className="panel chart-panel"><div className="section-head"><div><h2>New users per month</h2><p>Last 12 months</p></div></div><div className="chart-wrap"><Bar data={{ labels: monthDates.map(date => date.toLocaleDateString("en", { month: "short", year: "2-digit" }).replace(" ", " ’")), datasets: [{ data: monthly, backgroundColor: "#059669", hoverBackgroundColor: "#047857", borderRadius: 5, maxBarThickness: 32 }] }} options={{ responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: "#0F172A", padding: 10, displayColors: false } }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: "#64748B", font: { family: "Inter", size: 11 }, maxRotation: 0, autoSkip: true } }, y: { beginAtZero: true, border: { display: false, dash: [3, 4] }, grid: { color: "#EEF1F4" }, ticks: { color: "#94A3B8", precision: 0, stepSize: 1, font: { family: "Inter", size: 11 } } } } }} /></div></section>
           <section className="panel usage-panel"><div className="section-head"><h2>Usage</h2></div><div className="usage-list"><div><span>Documents shared <small>(all users)</small></span><strong>{number(users.reduce((sum, user) => sum + (user.usage?.shareCount || 0), 0))}</strong></div><div><span>Storage used <small>(all users)</small></span><strong>{formatStorage(users.reduce((sum, user) => sum + (user.usage?.storageBytes || 0), 0))}</strong></div><div><span>Lapsed <small>(expired, cancelled, past due)</small></span><strong>{number(lapsed)}</strong></div></div></section></div>
@@ -166,7 +178,6 @@ export default function Dashboard() {
           {filtered.length ? <><div className="table-scroll"><table><thead><tr>{["Name", "Email", "Account", "Plan", "Status", "Verified", "Shares", "Storage", "Registered"].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{visible.map(user => <tr key={user._id} tabIndex={0} role="button" aria-label={`View details for ${displayName(user)}`} onClick={() => setSelected(user)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(user); } }}><td className="name-cell"><span className="table-avatar">{displayName(user).slice(0, 1).toUpperCase()}</span><span>{displayName(user)}</span></td><td>{user.email}</td><td>{user.accountType ? user.accountType[0].toUpperCase() + user.accountType.slice(1) : "-"}{user.role === "TEAM_MEMBER" && <span className="team-pill">Team member</span>}</td><td>{user.subscription?.subscriptionPlan || "-"}</td><td><StatusPill value={user.subscription?.status} /></td><td>{user.isVerified ? <span className="verified"><BadgeCheck size={17} aria-label="Verified" /> Yes</span> : "No"}</td><td>{number(user.usage?.shareCount || 0)}</td><td>{formatStorage(user.usage?.storageBytes)}</td><td>{validDate(user.createdAt) ? <time dateTime={validDate(user.createdAt)!.toISOString()}>{formatDate(user.createdAt)}</time> : "-"}</td></tr>)}</tbody></table></div><div className="table-footer"><span aria-live="polite">Showing {number((currentPage - 1) * pageSize + 1)}–{number(Math.min(currentPage * pageSize, filtered.length))} of {number(filtered.length)} users</span>{pages > 1 && <div className="pagination"><button className="icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={18} /></button><span>Page {currentPage} of {pages}</span><button className="icon-button" aria-label="Next page" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={18} /></button></div>}</div></> : <div className="table-empty"><span><Users size={24} /></span><h3>No users found</h3><p>Try a different search or status filter.</p></div>}
         </section>
       </>}
-    </main>
     <AnimatePresence>{selected && <DetailDialog key={selected._id} user={selected} users={users} close={() => setSelected(null)} />}</AnimatePresence>
-  </div>;
+  </>;
 }
