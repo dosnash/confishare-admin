@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { csvFor, formatStorage, normalizeUsers } from "./admin.ts";
+import { csvFor, effectiveStatus, effectiveStatusLabel, formatStorage, normalizeUsers, renewalDue } from "./admin.ts";
 
 const person = { _id: "1", email: "person@example.com", firstName: "Ada", lastName: "Okafor", usage: { shareCount: 2, storageBytes: 1048576 } };
 
@@ -23,4 +23,33 @@ test("exports quoted cells, neutralizes formulas, and uses all supplied rows", (
   assert.ok(csv.includes("\"'=HYPERLINK(\"\"x\"\") Okafor\""));
   assert.equal(csv.split("\r\n").length, 3);
   assert.ok(csv.includes('"1.00"'));
+});
+
+const NOW = Date.parse("2026-11-21T12:00:00Z");
+const sub = (subscription) => ({ _id: "u", email: "u@example.com", subscription });
+
+test("a TRIAL whose end date has passed is a trial that ended", () => {
+  assert.equal(effectiveStatus(sub({ status: "TRIAL", trialEndDate: "2026-11-20T00:00:00Z" }), NOW), "TRIAL_ENDED");
+  assert.equal(effectiveStatus(sub({ status: "TRIAL", trialEndDate: "2026-11-21T12:00:00Z" }), NOW), "TRIAL_ENDED");
+  assert.equal(effectiveStatus(sub({ status: "TRIAL", trialEndDate: "2026-11-30T00:00:00Z" }), NOW), "TRIAL");
+  assert.equal(effectiveStatus(sub({ status: "TRIAL", trialEndDate: null }), NOW), "TRIAL");
+  assert.equal(effectiveStatus(sub({ status: "TRIAL", trialEndDate: "not a date" }), NOW), "TRIAL");
+});
+
+test("backend statuses are authoritative, case-insensitive, and missing status is not shown as Trial", () => {
+  for (const status of ["ACTIVE", "PAST_DUE", "EXPIRED", "CANCELLED"]) assert.equal(effectiveStatus(sub({ status, trialEndDate: "2026-01-01T00:00:00Z" }), NOW), status);
+  assert.equal(effectiveStatus(sub({ status: "active" }), NOW), "ACTIVE");
+  assert.equal(effectiveStatus(sub(null), NOW), "NONE");
+  assert.equal(effectiveStatus(sub({}), NOW), "NONE");
+  assert.equal(effectiveStatus(sub({ status: "PAUSED" }), NOW), "OTHER");
+  assert.equal(effectiveStatusLabel(sub({ status: "PAUSED" }), NOW), "PAUSED");
+});
+
+test("ACTIVE past its period end stays active with renewal due", () => {
+  const user = sub({ status: "ACTIVE", subscriptionExpiresAt: "2026-11-21T00:00:00Z" });
+  assert.equal(effectiveStatus(user, NOW), "ACTIVE");
+  assert.equal(renewalDue(user, NOW), true);
+  assert.equal(effectiveStatusLabel(user, NOW), "Active (renewal due)");
+  assert.equal(renewalDue(sub({ status: "ACTIVE", subscriptionExpiresAt: "2026-12-21T00:00:00Z" }), NOW), false);
+  assert.equal(renewalDue(sub({ status: "EXPIRED", subscriptionExpiresAt: "2026-11-01T00:00:00Z" }), NOW), false);
 });
