@@ -21,6 +21,14 @@ const rules: { method: Method; pattern: RegExp }[] = [
   { method: "GET", pattern: /^document-audit-logs$/ },
 ];
 
+/** Turns an upstream failure into a message that names the real cause instead of a generic one. */
+function describe(status: number, detail: string) {
+  if (status === 429) return "The server is receiving too many requests. Wait a minute, then refresh.";
+  if (status === 502 || status === 503 || status === 504) return `The ConfiShare server is temporarily unavailable (${status}). Try again shortly.`;
+  if (status >= 500) return `The ConfiShare server hit an error (${status})${detail ? `: ${detail}` : ""}. Try again shortly.`;
+  return `The request failed (${status})${detail ? `: ${detail}` : ""}.`;
+}
+
 async function forward(request: NextRequest, context: { params: Promise<{ path: string[] }> }, method: Method) {
   const segments = (await context.params).path || [];
   if (segments.some(part => !part || part === "." || part === "..")) return NextResponse.json({ error: "Not found." }, { status: 404 });
@@ -64,13 +72,15 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
       }
       return passthrough;
     }
-    return NextResponse.json({ error: "The request could not be completed." }, { status: upstream.status });
+    const text = (await upstream.text().catch(() => "")).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+    return NextResponse.json({ error: describe(upstream.status, text) }, { status: upstream.status });
   }
 
   const payload = await upstream.json().catch(() => ({}));
   if (!upstream.ok) {
-    const fallback = upstream.status === 403 ? "You don't have permission to do that." : upstream.status === 404 ? "That record no longer exists." : "The request could not be completed.";
-    return NextResponse.json({ error: upstreamMessage(payload, fallback), field: (payload as { field?: string }).field }, { status: upstream.status });
+    const fallback = upstream.status === 403 ? "You don't have permission to do that." : upstream.status === 404 ? "That record no longer exists." : describe(upstream.status, "");
+    const message = upstream.status === 429 ? describe(429, "") : upstreamMessage(payload, fallback);
+    return NextResponse.json({ error: message, field: (payload as { field?: string }).field }, { status: upstream.status });
   }
   return NextResponse.json(payload, { status: upstream.status });
 }

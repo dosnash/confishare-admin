@@ -24,9 +24,10 @@ export function useAdminApi() {
   return useCallback(async <T = unknown>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`/api/admin/${path.replace(/^\/+/, "")}`, { cache: "no-store", ...init, headers: { ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers } });
     const result = await response.json().catch(() => ({}));
-    if (response.status === 401) { expired(); throw new Error("Your session has ended. Sign in again."); }
+    if (response.status === 401) { expired(); throw Object.assign(new Error("Your session has ended. Sign in again."), { status: 401 }); }
     if (!response.ok) {
-      const error = new Error((result as { error?: string }).error || "The request could not be completed.") as Error & { status?: number; field?: string };
+      const fallback = response.status === 504 || response.status === 502 ? `The server took too long to respond (${response.status}). Try again shortly.` : `The request failed (${response.status}). Try again shortly.`;
+      const error = new Error((result as { error?: string }).error || fallback) as Error & { status?: number; field?: string };
       error.status = response.status;
       error.field = (result as { field?: string }).field;
       throw error;

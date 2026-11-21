@@ -112,7 +112,16 @@ export default function Dashboard() {
       const all: AdminUser[] = [];
       const seen = new Set<string>();
       for (let page = 1; page <= 200; page++) {
-        const result = await api(`users?page=${page}&limit=100`);
+        let result: unknown;
+        for (let attempt = 0; ; attempt++) {
+          try { result = await api(`users?page=${page}&limit=100`); break; }
+          catch (cause) {
+            const code = (cause as { status?: number }).status;
+            const transient = code === undefined || code === 429 || code >= 500;
+            if (!transient || attempt >= 2 || code === 401) throw cause;
+            await new Promise(resolve => setTimeout(resolve, 800 * (attempt + 1)));
+          }
+        }
         const batch = normalizeUsers(result);
         const fresh = batch.filter(user => !seen.has(user._id));
         fresh.forEach(user => { seen.add(user._id); all.push(user); });
