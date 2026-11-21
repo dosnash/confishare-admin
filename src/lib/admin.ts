@@ -8,6 +8,7 @@ export type AdminUser = {
   accountType?: string;
   role?: string;
   companyId?: string | null;
+  name?: string;
   isVerified?: boolean;
   emailVerifiedAt?: string | null;
   createdAt?: string;
@@ -70,7 +71,7 @@ export function effectiveStatusLabel(user: AdminUser, now: number = Date.now()) 
 }
 
 export function displayName(user: AdminUser) {
-  return [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.companyName || "-";
+  return [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.companyName || user.name || "-";
 }
 
 export function validDate(value?: string | null) {
@@ -100,12 +101,16 @@ export function csvFor(users: AdminUser[], allUsers: AdminUser[]) {
     if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replaceAll('"', '""')}"`;
   };
-  const rows = users.map((u) => [
-    displayName(u), u.email, u.accountType || "-", u.role === "TEAM_MEMBER" ? "Team member" : "Owner",
-    companyFor(u, allUsers), u.subscription?.subscriptionPlan || "No paid plan", effectiveStatusLabel(u), rawStatus(u) || "-",
-    u.isVerified ? "Yes" : "No", u.usage?.shareCount || 0, ((u.usage?.storageBytes || 0) / 1048576).toFixed(2),
-    validDate(u.createdAt)?.toISOString() || "", validDate(u.subscription?.trialEndDate)?.toISOString() || "", validDate(u.subscription?.subscriptionExpiresAt)?.toISOString() || "",
-  ]);
+  const rows = users.map((u) => {
+    const billing = billingAccount(u, allUsers);
+    const inherited = billing !== u;
+    return [
+      displayName(u), u.email, u.accountType || "-", u.role === "TEAM_MEMBER" ? "Team member" : "Owner",
+      companyFor(u, allUsers), planLabel(billing.subscription?.subscriptionPlan), effectiveStatusLabel(billing) + (inherited ? " (company)" : ""), rawStatus(u) || "-",
+      u.isVerified ? "Yes" : "No", u.usage?.shareCount || 0, ((u.usage?.storageBytes || 0) / 1048576).toFixed(2),
+      validDate(u.createdAt)?.toISOString() || "", validDate(billing.subscription?.trialEndDate)?.toISOString() || "", validDate(billing.subscription?.subscriptionExpiresAt)?.toISOString() || "",
+    ];
+  });
   return "\uFEFF" + [headers, ...rows].map((row) => row.map(safeCell).join(",")).join("\r\n");
 }
 
@@ -117,9 +122,40 @@ export function normalizeUsers(payload: unknown): AdminUser[] {
   if (!Array.isArray(raw)) throw new Error("The API returned an unexpected users format.");
   return raw.map((item, index) => {
     if (!item || typeof item !== "object") throw new Error(`User ${index + 1} was invalid.`);
-    const user = item as AdminUser;
+    const user = item as AdminUser & Record<string, unknown>;
     const id = user._id || user.id;
     if (!id || typeof user.email !== "string") throw new Error(`User ${index + 1} was missing an ID or email.`);
-    return { ...user, _id: String(id) };
+    const text = (value: unknown) => typeof value === "string" && value.trim() ? value : null;
+    const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    // GET /admin/users returns billing and usage flat on the user (plan, status, trialEndDate,
+    // subscriptionExpiresAt, shareCount, storageBytes); older endpoints nest them. Accept both.
+    const subscription = user.subscription && typeof user.subscription === "object" ? user.subscription : {
+      status: text(user.status) ?? undefined,
+      subscriptionPlan: text(user.plan),
+      trialEndDate: text(user.trialEndDate),
+      subscriptionExpiresAt: text(user.subscriptionExpiresAt),
+    };
+    const usage = user.usage && typeof user.usage === "object" ? user.usage : { shareCount: count(user.shareCount), storageBytes: count(user.storageBytes) };
+    return {
+      ...user,
+      _id: String(id),
+      firstName: text(user.firstName) ?? undefined,
+      lastName: text(user.lastName) ?? undefined,
+      companyName: text(user.companyName) ?? undefined,
+      name: text(user.name) ?? undefined,
+      subscription,
+      usage,
+    };
   });
+}
+
+/** Team members are covered by their company's subscription; their own record holds only a default trial. */
+export function billingAccount(user: AdminUser, users: AdminUser[]) {
+  if (user.role !== "TEAM_MEMBER" || !user.companyId) return user;
+  return users.find(candidate => candidate._id === user.companyId) ?? user;
+}
+
+export function planLabel(plan?: string | null) {
+  if (!plan) return "No paid plan";
+  return plan.charAt(0).toUpperCase() + plan.slice(1).toLowerCase();
 }

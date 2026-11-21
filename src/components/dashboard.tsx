@@ -6,7 +6,7 @@ import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip } fro
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { AlertCircle, ArrowDownToLine, BadgeCheck, Building2, ChevronLeft, ChevronRight, CreditCard, Hourglass, RefreshCw, Search, ShieldCheck, User, Users, UsersRound, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AdminUser, companyFor, csvFor, displayName, formatDate, formatStorage, effectiveStatus, effectiveStatusLabel, normalizeUsers, rawStatus, renewalDue, statusLabel, statuses, StatusFilter, validDate } from "@/lib/admin";
+import { AdminUser, billingAccount, companyFor, csvFor, displayName, formatDate, formatStorage, effectiveStatus, effectiveStatusLabel, normalizeUsers, planLabel, rawStatus, renewalDue, statusLabel, statuses, StatusFilter, validDate } from "@/lib/admin";
 import { useAdminApi, useSession } from "./admin-shell";
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip);
@@ -25,11 +25,11 @@ function totalOf(payload: unknown): number | null {
 }
 type DateFilter = "ANY" | "TODAY" | "7" | "30" | "MONTH" | "CUSTOM";
 
-function StatusPill({ user, now }: { user: AdminUser; now: number }) {
+function StatusPill({ user, now, inherited = false }: { user: AdminUser; now: number; inherited?: boolean }) {
   const status = effectiveStatus(user, now);
   const label = status === "OTHER" ? rawStatus(user) : statusLabel[status];
   const due = renewalDue(user, now);
-  return <span className="status-stack"><span className={`status-pill status-${status.toLowerCase()}`} title={status === "TRIAL_ENDED" ? "Stored as TRIAL, but the trial end date has passed" : undefined}>{label}</span>{due && <small className="status-note">Renewal due</small>}</span>;
+  return <span className="status-stack"><span className={`status-pill status-${status.toLowerCase()}`} title={status === "TRIAL_ENDED" ? "Stored as TRIAL, but the trial end date has passed" : undefined}>{label}</span>{due && <small className="status-note">Renewal due</small>}{inherited && <small className="status-note inherited">Via company</small>}</span>;
 }
 
 function StatCard({ label, value, icon: Icon, index }: { label: string; value: number; icon: LucideIcon; index: number }) {
@@ -46,6 +46,8 @@ function Breakdown({ title, rows, total }: { title: string; rows: { label: strin
 function DetailDialog({ user, users, close }: { user: AdminUser; users: AdminUser[]; close: () => void }) {
   const dialog = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
+  const billing = billingAccount(user, users);
+  const inherited = billing !== user;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const oldOverflow = document.body.style.overflow;
@@ -68,11 +70,11 @@ function DetailDialog({ user, users, close }: { user: AdminUser; users: AdminUse
     ["Account type", user.accountType ? user.accountType[0].toUpperCase() + user.accountType.slice(1) : "-"],
     ["Role", user.role === "TEAM_MEMBER" ? "Team member" : "Owner"],
     ...(user.companyId ? [["Company", companyFor(user, users)]] : []),
-    ["Status", effectiveStatusLabel(user)],
-    ...(rawStatus(user) && effectiveStatus(user) !== rawStatus(user) ? [["Stored status", rawStatus(user)]] : []),
-    ["Plan", user.subscription?.subscriptionPlan || "No paid plan"],
-    ["Trial ends", formatDate(user.subscription?.trialEndDate)],
-    ["Subscription expires", formatDate(user.subscription?.subscriptionExpiresAt)],
+    ["Status", effectiveStatusLabel(billing) + (inherited ? " (company subscription)" : "")],
+    ...(!inherited && rawStatus(user) && effectiveStatus(user) !== rawStatus(user) ? [["Stored status", rawStatus(user)]] : []),
+    ["Plan", planLabel(billing.subscription?.subscriptionPlan)],
+    ["Trial ends", formatDate(billing.subscription?.trialEndDate)],
+    ["Subscription expires", formatDate(billing.subscription?.subscriptionExpiresAt)],
     ["Email verified", user.isVerified ? "Yes" : "No"],
     ["Documents shared", number(user.usage?.shareCount || 0)],
     ["Storage used", formatStorage(user.usage?.storageBytes)],
@@ -128,16 +130,19 @@ export default function Dashboard() {
   useEffect(() => setPage(1), [status, search, plan, dateFilter, from, to]);
   // Re-evaluated whenever users reload, so trial and renewal dates are judged against the current time.
   const now = useMemo(() => new Date(), [users]); // eslint-disable-line react-hooks/exhaustive-deps
+  const billingOf = useMemo(() => new Map(users.map(user => [user._id, billingAccount(user, users)])), [users]);
+  const bill = useCallback((user: AdminUser) => billingOf.get(user._id) ?? user, [billingOf]);
   const counts = useMemo(() => {
     const tally: Record<string, number> = Object.fromEntries(statuses.map(item => [item, 0]));
-    users.forEach(user => { const key = effectiveStatus(user, now.getTime()); if (key in tally) tally[key] += 1; });
+    users.forEach(user => { const key = effectiveStatus(bill(user), now.getTime()); if (key in tally) tally[key] += 1; });
     return tally;
-  }, [users, now]);
+  }, [users, now, bill]);
   const visibleStatuses = statuses.filter(item => item !== "NONE" || (counts.NONE || 0) > 0 || status === "NONE");
-  const plans = useMemo(() => [...new Set(users.map(user => user.subscription?.subscriptionPlan).filter((item): item is string => !!item))].sort((a, b) => a.localeCompare(b)), [users]);
+  const plans = useMemo(() => [...new Set(users.map(user => bill(user).subscription?.subscriptionPlan).filter((item): item is string => !!item))].sort((a, b) => a.localeCompare(b)), [users, bill]);
   const filtered = useMemo(() => users.filter(user => {
-    if (status !== "ALL" && effectiveStatus(user, now.getTime()) !== status) return false;
-    if (plan !== "ALL" && (plan === "NONE" ? !!user.subscription?.subscriptionPlan : user.subscription?.subscriptionPlan !== plan)) return false;
+    const billing = bill(user);
+    if (status !== "ALL" && effectiveStatus(billing, now.getTime()) !== status) return false;
+    if (plan !== "ALL" && (plan === "NONE" ? !!billing.subscription?.subscriptionPlan : billing.subscription?.subscriptionPlan !== plan)) return false;
     const needle = search.trim().toLocaleLowerCase();
     if (needle && ![displayName(user), user.email, user.companyName || ""].some(value => value.toLocaleLowerCase().includes(needle))) return false;
     if (dateFilter !== "ANY") {
@@ -153,7 +158,7 @@ export default function Dashboard() {
       }
     }
     return true;
-  }).sort((a, b) => (validDate(b.createdAt)?.getTime() || 0) - (validDate(a.createdAt)?.getTime() || 0)), [users, status, plan, search, dateFilter, from, to, now]);
+  }).sort((a, b) => (validDate(b.createdAt)?.getTime() || 0) - (validDate(a.createdAt)?.getTime() || 0)), [users, status, plan, search, dateFilter, from, to, now, bill]);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pages);
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -163,14 +168,14 @@ export default function Dashboard() {
   const stats: { label: string; value: number; icon: LucideIcon }[] = [
     { label: "Total users", value: users.length, icon: Users },
     { label: "Verified emails", value: users.filter(user => user.isVerified === true).length, icon: BadgeCheck },
-    { label: "Paying (active)", value: counts.ACTIVE || 0, icon: CreditCard },
+    { label: "Paying accounts (active)", value: users.filter(user => bill(user) === user && effectiveStatus(user, now.getTime()) === "ACTIVE").length, icon: CreditCard },
     { label: "On free trial (current)", value: counts.TRIAL || 0, icon: Hourglass },
     { label: "Individual accounts", value: users.filter(user => user.accountType === "individual").length, icon: User },
     { label: "Company accounts", value: users.filter(user => user.accountType === "company").length, icon: Building2 },
     { label: "Team members", value: users.filter(user => user.role === "TEAM_MEMBER").length, icon: UsersRound },
     { label: "New in last 30 days", value: users.filter(user => { const date = validDate(user.createdAt); return date && date <= now && date.getTime() >= now.getTime() - 30 * 86400000; }).length, icon: Users },
   ];
-  const planRows = useMemo(() => { const map = new Map<string, number>(); users.forEach(user => { const key = user.subscription?.subscriptionPlan || "No paid plan"; map.set(key, (map.get(key) || 0) + 1); }); return [...map].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)); }, [users]);
+  const planRows = useMemo(() => { const map = new Map<string, number>(); users.forEach(user => { const key = planLabel(bill(user).subscription?.subscriptionPlan); map.set(key, (map.get(key) || 0) + 1); }); return [...map].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)); }, [users, bill]);
   function exportCsv() { const blob = new Blob([csvFor(filtered, users)], { type: "text/csv;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `confishare-users-${dateKey(new Date())}.csv`; link.click(); URL.revokeObjectURL(url); }
   return <>
 
@@ -182,9 +187,9 @@ export default function Dashboard() {
         <div className="breakdowns-grid"><Breakdown title="Subscription status" total={users.length} rows={visibleStatuses.map(item => ({ label: statusLabel[item], count: counts[item] || 0 }))} /><Breakdown title="Plans" total={users.length} rows={planRows} /></div>
         <section className="panel users-panel" aria-labelledby="users-heading"><div className="users-head"><div><h2 id="users-heading">Users</h2><p>Click a user to see their details.</p></div><span className="users-total">{number(users.length)} total</span></div>
           <div className="status-filters" aria-label="Filter by subscription status">{(["ALL", ...visibleStatuses] as StatusFilter[]).map(item => <button key={item} className={`filter-chip ${status === item ? "selected" : ""}`} aria-pressed={status === item} onClick={() => setStatus(item)}>{item === "ALL" ? "All" : statusLabel[item]} <span>({item === "ALL" ? users.length : counts[item] || 0})</span></button>)}</div>
-          <div className="filter-toolbar"><div className="search-wrap"><Search size={18} /><input aria-label="Search users" placeholder="Search by name, email or company..." value={search} onChange={event => setSearch(event.target.value)} /></div><select aria-label="Filter by plan" className="select-field" value={plan} onChange={event => setPlan(event.target.value)}><option value="ALL">All plans</option><option value="NONE">No paid plan</option>{plans.map(item => <option key={item} value={item}>{item}</option>)}</select><select aria-label="Filter by registration date" className="select-field" value={dateFilter} onChange={event => setDateFilter(event.target.value as DateFilter)}><option value="ANY">Registered any time</option><option value="TODAY">Registered today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="MONTH">This month</option><option value="CUSTOM">Custom range…</option></select><button className="button button-primary export-button" disabled={!filtered.length} onClick={exportCsv}><ArrowDownToLine size={16} /> Export CSV ({filtered.length})</button></div>
+          <div className="filter-toolbar"><div className="search-wrap"><Search size={18} /><input aria-label="Search users" placeholder="Search by name, email or company..." value={search} onChange={event => setSearch(event.target.value)} /></div><select aria-label="Filter by plan" className="select-field" value={plan} onChange={event => setPlan(event.target.value)}><option value="ALL">All plans</option><option value="NONE">No paid plan</option>{plans.map(item => <option key={item} value={item}>{planLabel(item)}</option>)}</select><select aria-label="Filter by registration date" className="select-field" value={dateFilter} onChange={event => setDateFilter(event.target.value as DateFilter)}><option value="ANY">Registered any time</option><option value="TODAY">Registered today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="MONTH">This month</option><option value="CUSTOM">Custom range…</option></select><button className="button button-primary export-button" disabled={!filtered.length} onClick={exportCsv}><ArrowDownToLine size={16} /> Export CSV ({filtered.length})</button></div>
           {dateFilter === "CUSTOM" && <div className="date-range"><label>From <input type="date" value={from} max={to || undefined} onChange={event => { const value = event.target.value; setFrom(value); if (to && value > to) setTo(""); }} /></label><label>To <input type="date" value={to} min={from || undefined} onChange={event => setTo(event.target.value)} /></label></div>}
-          {filtered.length ? <><div className="table-scroll"><table><thead><tr>{["Name", "Email", "Account", "Plan", "Status", "Verified", "Shares", "Storage", "Registered"].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{visible.map(user => <tr key={user._id} tabIndex={0} role="button" aria-label={`View details for ${displayName(user)}`} onClick={() => setSelected(user)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(user); } }}><td className="name-cell"><span className="table-avatar">{displayName(user).slice(0, 1).toUpperCase()}</span><span>{displayName(user)}</span></td><td>{user.email}</td><td>{user.accountType ? user.accountType[0].toUpperCase() + user.accountType.slice(1) : "-"}{user.role === "TEAM_MEMBER" && <span className="team-pill">Team member</span>}</td><td>{user.subscription?.subscriptionPlan || "-"}</td><td><StatusPill user={user} now={now.getTime()} /></td><td>{user.isVerified ? <span className="verified"><BadgeCheck size={17} aria-label="Verified" /> Yes</span> : "No"}</td><td>{number(user.usage?.shareCount || 0)}</td><td>{formatStorage(user.usage?.storageBytes)}</td><td>{validDate(user.createdAt) ? <time dateTime={validDate(user.createdAt)!.toISOString()}>{formatDate(user.createdAt)}</time> : "-"}</td></tr>)}</tbody></table></div><div className="table-footer"><span aria-live="polite">Showing {number((currentPage - 1) * pageSize + 1)}–{number(Math.min(currentPage * pageSize, filtered.length))} of {number(filtered.length)} users</span>{pages > 1 && <div className="pagination"><button className="icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={18} /></button><span>Page {currentPage} of {pages}</span><button className="icon-button" aria-label="Next page" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={18} /></button></div>}</div></> : <div className="table-empty"><span><Users size={24} /></span><h3>No users found</h3><p>Try a different search or status filter.</p></div>}
+          {filtered.length ? <><div className="table-scroll"><table><thead><tr>{["Name", "Email", "Account", "Plan", "Status", "Verified", "Shares", "Storage", "Registered"].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{visible.map(user => <tr key={user._id} tabIndex={0} role="button" aria-label={`View details for ${displayName(user)}`} onClick={() => setSelected(user)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(user); } }}><td className="name-cell"><span className="table-avatar">{displayName(user).slice(0, 1).toUpperCase()}</span><span>{displayName(user)}</span></td><td>{user.email}</td><td>{user.accountType ? user.accountType[0].toUpperCase() + user.accountType.slice(1) : "-"}{user.role === "TEAM_MEMBER" && <span className="team-pill">Team member</span>}</td><td>{bill(user).subscription?.subscriptionPlan ? planLabel(bill(user).subscription?.subscriptionPlan) : "-"}</td><td><StatusPill user={bill(user)} now={now.getTime()} inherited={bill(user) !== user} /></td><td>{user.isVerified ? <span className="verified"><BadgeCheck size={17} aria-label="Verified" /> Yes</span> : "No"}</td><td>{number(user.usage?.shareCount || 0)}</td><td>{formatStorage(user.usage?.storageBytes)}</td><td>{validDate(user.createdAt) ? <time dateTime={validDate(user.createdAt)!.toISOString()}>{formatDate(user.createdAt)}</time> : "-"}</td></tr>)}</tbody></table></div><div className="table-footer"><span aria-live="polite">Showing {number((currentPage - 1) * pageSize + 1)}–{number(Math.min(currentPage * pageSize, filtered.length))} of {number(filtered.length)} users</span>{pages > 1 && <div className="pagination"><button className="icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={18} /></button><span>Page {currentPage} of {pages}</span><button className="icon-button" aria-label="Next page" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={18} /></button></div>}</div></> : <div className="table-empty"><span><Users size={24} /></span><h3>No users found</h3><p>Try a different search or status filter.</p></div>}
         </section>
       </>}
     <AnimatePresence>{selected && <DetailDialog key={selected._id} user={selected} users={users} close={() => setSelected(null)} />}</AnimatePresence>
